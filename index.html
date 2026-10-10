@@ -97,6 +97,9 @@ section h2 .sum{font-family:var(--mono);letter-spacing:0;text-transform:none;col
 .status.warn{color:var(--fg)}
 .linkbtn{background:none;border:0;padding:0;color:var(--dim);font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
 .linkbtn:hover{color:var(--fg)}
+.askhint{font-size:12px;color:var(--muted);margin:8px 0 0}
+.askhint.ok{color:var(--ink)}
+.askbox{width:100%;min-height:160px;margin-top:10px;font-family:var(--mono);line-height:1.5;resize:vertical}
 /* sign-in */
 .signin{max-width:360px;margin:12vh auto 0;display:flex;flex-direction:column;gap:14px}
 .signin form{display:flex;flex-direction:column;gap:8px}
@@ -141,6 +144,16 @@ section h2 .sum{font-family:var(--mono);letter-spacing:0;text-transform:none;col
     <div class="tot"><span class="eyebrow">Spent &amp; saved</span><span class="v" id="tOut">$0</span><span class="s" id="tOutS">of $0 planned</span></div>
     <div class="tot hero"><span class="eyebrow">Left this month</span><span class="v" id="tLeft">$0</span><span class="s" id="tLeftS">$0 if all goes to plan</span></div>
   </div>
+
+  <section>
+    <h2>Ask Alfred</h2>
+    <form class="addcat" id="askForm" style="margin-top:0">
+      <input class="field" type="text" id="askQ" placeholder="Your question — e.g. can I afford the repair this week?" aria-label="Your question">
+      <button class="btn solid" type="submit">Ask</button>
+    </form>
+    <p class="askhint" id="askHint">Copies this month's figures and your question, then opens Claude. Paste it in to ask.</p>
+    <textarea class="field askbox" id="askBox" readonly hidden aria-label="Summary to paste into Claude"></textarea>
+  </section>
 
   <section>
     <h2>Log a transaction</h2>
@@ -331,6 +344,46 @@ section h2 .sum{font-family:var(--mono);letter-spacing:0;text-transform:none;col
     if(date.slice(0,7)!==month){month=date.slice(0,7)}
     $("fAmt").value="";$("fNote").value="";$("fAmt").focus();
   });
+  /* ---------- Ask Alfred ---------- */
+  function summary(q){
+    const mtx=txs.filter(t=>t.month===month);
+    const actual={};mtx.forEach(t=>{actual[t.cat]=(actual[t.cat]||0)+Number(t.amount||0)});
+    const L=[];
+    L.push("Alfred, here is my ledger for "+monthLabel(month)+" (as of "+now.toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})+").");
+    let pIn=0,pOut=0,aIn=0,aOut=0;
+    GROUPS.forEach(G=>{
+      const list=cats.filter(c=>c.group===G.key);if(!list.length)return;
+      L.push("");L.push(G.label+" (planned / actual):");
+      list.forEach(c=>{const a=actual[c.id]||0;L.push("- "+c.name+": "+fmt(c.planned)+" / "+fmt(a));
+        if(G.key==="income"){pIn+=c.planned;aIn+=a}else{pOut+=c.planned;aOut+=a}});
+    });
+    L.push("");
+    L.push("Totals: income "+fmt(aIn)+" of "+fmt(pIn)+" planned; spent and saved "+fmt(aOut)+" of "+fmt(pOut)+" planned; left this month "+fmt(aIn-aOut)+".");
+    const recent=mtx.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,15);
+    if(recent.length){L.push("");L.push("Recent transactions:");
+      recent.forEach(t=>{const c=cats.find(k=>k.id===t.cat);L.push("- "+t.date+" "+(c?c.name:"?")+" "+fmt(Number(t.amount))+(t.note?" ("+t.note+")":""))})}
+    L.push("");
+    L.push("My question: "+(q||"How am I doing this month, and what should I do next?"));
+    return L.join("\n");
+  }
+  $("askForm").addEventListener("submit",async e=>{
+    e.preventDefault();
+    const text=summary($("askQ").value.trim());
+    const hint=$("askHint"),box=$("askBox");
+    let copied=false;
+    try{await navigator.clipboard.writeText(text);copied=true}catch(err){copied=false}
+    if(copied){
+      box.hidden=true;hint.classList.add("ok");
+      hint.textContent="Copied. Claude is opening in a new tab: paste it into a new chat and send.";
+      window.open("https://claude.ai/new","_blank","noopener");
+    }else{
+      box.value=text;box.hidden=false;box.focus();box.select();hint.classList.add("ok");
+      hint.innerHTML="";hint.append("Your phone blocked automatic copying. Copy the text below, then ");
+      const a=document.createElement("a");a.href="https://claude.ai/new";a.target="_blank";a.rel="noopener";a.textContent="open Claude";a.style.color="inherit";
+      hint.append(a,".");
+    }
+  });
+
   $("signout").addEventListener("click",async()=>{await sb.auth.signOut();location.reload()});
 
   /* ---------- sign-in ---------- */
